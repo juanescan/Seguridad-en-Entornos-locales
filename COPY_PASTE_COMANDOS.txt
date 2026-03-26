@@ -1,0 +1,84 @@
+🎬 COMANDOS EXACTOS PARA COPIAR Y PEGAR
+==========================================
+
+ESCENA 1: MOSTRAR CÓDIGO VULNERABLE
+────────────────────────────────────
+Get-Content src\main\java\cloudSecurityLocal\ECI\controller\SecurityCheckController.java
+
+
+ESCENA 2: INTENTAR COMMIT (SERÁ BLOQUEADO) ❌
+──────────────────────────────────────────────
+git add src\main\java\cloudSecurityLocal\ECI\controller\SecurityCheckController.java
+git commit -m "DEMO-1: Add security controller with exposed secrets"
+
+
+ESCENA 3: MOSTRAR CÓDIGO CORREGIDO
+──────────────────────────────────
+Get-Content src\main\java\cloudSecurityLocal\ECI\controller\SecurityCheckController.java
+
+
+ESCENA 4: MOSTRAR GITIGNORE
+───────────────────────────
+Get-Content .\.gitignore | Select-Object -First 15
+
+
+ESCENA 5: MOSTRAR .ENV EJEMPLO
+──────────────────────────────
+Get-Content .env.example
+
+
+ESCENA 6: HACER COMMIT (SERÁ PERMITIDO) ✅
+───────────────────────────────────────────
+git add .
+git commit -m "DEMO-2: Fix - Move secrets to environment variables"
+
+
+ESCENA 7: VER LOGS
+──────────────────
+git log --oneline -5
+
+
+ESCENA 8: PUSH A GITHUB (TRIGGEAR ACTIONS)
+───────────────────────────────────────────
+git push origin main
+
+[Luego abrir navegador:]
+https://github.com/juanescan/Seguridad-en-Entornos-locales/actions
+
+
+ESCENA 9 (OPCIONAL): VER AZURE
+───────────────────────────────
+https://portal.azure.com
+
+[O probar endpoint:]
+$response = Invoke-WebRequest -Uri "https://TU-APP-NAME.azurewebsites.net/api/security/status"
+$response.Content
+
+
+COMANDOS ÚTILES SI HAY PROBLEMAS
+─────────────────────────────────
+
+Resetear al estado vulnerable:
+git reset --hard HEAD^
+
+Ver status:
+git status
+
+Ver cambios:
+git diff --cached
+
+Ver últimos commits:
+git log --oneline -3
+
+Forzar commit (no recomendado):
+git commit --no-verify
+
+
+TIMING TOTAL: 12-15 MINUTOS
+────────────────────────────
+- Intro: 1-2 min
+- Demo Fallida: 4-5 min
+- Demo Exitosa: 3-4 min
+- GitHub Actions: 3-4 min
+- Azure (opcional): 2-3 min
+- Conclusión: 1-2 min

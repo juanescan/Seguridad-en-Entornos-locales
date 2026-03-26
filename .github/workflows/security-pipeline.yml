@@ -1,0 +1,190 @@
+name: 🔐 Security Pipeline - Detect & Deploy
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ETAPA 1: Detección de secretos en el historial de Git
+  detect-secrets:
+    runs-on: ubuntu-latest
+    name: 🔍 Detect Secrets
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "🔎 Escaneando secretos con GitGuardian"
+        uses: gitguardian/ggshield-action@master
+        env:
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
+          GITHUB_PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        continue-on-error: false
+
+  # ETAPA 2: SAST (Static Application Security Testing) con CodeQL
+  codeql:
+    runs-on: ubuntu-latest
+    name: 🔐 CodeQL Analysis
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "⚙️ Inicializando CodeQL"
+        uses: github/codeql-action/init@v2
+        with:
+          languages: 'java'
+
+      - name: "☕ Setup Java"
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: "🏗️ Build"
+        run: mvn clean compile
+
+      - name: "🔍 Analizando con CodeQL"
+        uses: github/codeql-action/analyze@v2
+
+  # ETAPA 3: Análisis de dependencias vulnerables
+  dependency-check:
+    runs-on: ubuntu-latest
+    name: 🛡️ Dependency Check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "☕ Setup Java"
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: "📦 OWASP Dependency-Check"
+        run: |
+          mvn clean verify org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=7.0 \
+            -Dorg.owasp.dependencycheck.report.format=ALL
+
+      - name: "📤 Upload Dependency-Check Report"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: target/dependency-check-report.*
+
+  # ETAPA 4: Pruebas unitarias
+  tests:
+    runs-on: ubuntu-latest
+    name: 🧪 Unit Tests
+    needs: [detect-secrets, dependency-check]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "☕ Setup Java"
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: "🧪 Ejecutando pruebas"
+        run: mvn clean test
+
+      - name: "📊 Upload Test Results"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: target/surefire-reports/
+
+  # ETAPA 5: Build y Push a Docker Registry
+  build-image:
+    runs-on: ubuntu-latest
+    name: 🐳 Build Docker Image
+    needs: [codeql, tests]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "☕ Setup Java"
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: "🏗️ Build JAR"
+        run: mvn clean package -DskipTests
+
+      - name: "🔑 Setup Docker BuildX"
+        uses: docker/setup-buildx-action@v2
+
+      - name: "🔐 Login to GitHub Container Registry"
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "🐳 Build and Push Docker Image"
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+  # ETAPA 6: Secure Deployment a Azure
+  deploy-to-azure:
+    runs-on: ubuntu-latest
+    name: ☁️ Deploy to Azure
+    needs: [build-image]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://${{ secrets.AZURE_APP_NAME }}.azurewebsites.net
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "🔓 Login a Azure"
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: "🚀 Deploy a Azure App Service"
+        uses: Azure/webapps-deploy@v2
+        with:
+          app-name: ${{ secrets.AZURE_APP_NAME }}
+          package: target/*.jar
+          startup-command: 'java -jar *.jar'
+
+      - name: "✅ Verificando despliegue"
+        run: |
+          echo "🎉 Aplicación desplegada exitosamente"
+          echo "📍 URL: https://${{ secrets.AZURE_APP_NAME }}.azurewebsites.net/api/security/status"
+
+  # ETAPA 7: Notificación de éxito
+  notify-success:
+    runs-on: ubuntu-latest
+    name: 📢 Notify Success
+    needs: [deploy-to-azure]
+    if: success()
+    steps:
+      - name: "✅ Pipeline completado exitosamente"
+        run: |
+          echo "✅ ¡Todas las validaciones de seguridad pasaron!"
+          echo "☁️ Aplicación desplegada en Azure"
+          echo "🔐 Pipeline de seguridad: EXITOSO"
